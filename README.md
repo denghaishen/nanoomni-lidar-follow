@@ -200,7 +200,33 @@ colcon test-result --verbose
 
 ---
 
-## 8. 已知限制
+## 8. 复刻验收（10 分钟）
+
+前提：目标机器已安装 ROS 2 Humble、Nav2、Cartographer（见第 3 节）。
+
+```bash
+git clone --depth 1 https://github.com/denghaishen/nanoomni-lidar-follow.git
+cd nanoomni-lidar-follow
+bash tools/reproduce_check.sh
+```
+
+预期输出：
+
+```text
+Summary: 4 packages finished
+43 tests, 0 errors, 0 failures, 0 skipped
+REPRODUCE CHECK PASSED
+```
+
+实测耗时（RK3588，依赖已安装）：克隆约 1.1 分钟，编译约 18 秒，测试约 6 秒。
+
+> 从全新 Ubuntu 开始，apt 安装 ROS/Nav2/Cartographer 通常需要 5–20 分钟，总时长会超过 10 分钟。“10 分钟复刻”适用于已具备 ROS 环境的机器。
+
+脚本只做编译、测试和启动文件检查，**不会启动底盘、雷达或发送运动指令**。硬件联调需要真实机器人、`/dev/move_base`、`/dev/lidar` 和串口权限。
+
+---
+
+## 9. 已知限制
 
 - 激光只识别几何轮廓，不做身份识别；旁边有相似物体时可能跟错。
 - 跟随距离与速度按小型室内机器人设计，不适合高速或复杂室外场景。
@@ -211,7 +237,7 @@ colcon test-result --verbose
 
 ---
 
-## 9. 目录结构
+## 10. 目录结构
 
 ```text
 cartographer_ws/
@@ -227,12 +253,13 @@ cartographer_ws/
 │       ├── web/                    # 手机/电脑网页
 │       ├── systemd/                # 常驻服务模板
 │       └── test/                   # 43 项自动化测试
+├── tools/reproduce_check.sh        # 干净复刻验收脚本
 └── .gitignore
 ```
 
 ---
 
-## 10. 第三方组件与许可
+## 11. 第三方组件与许可
 
 | 组件 | 来源 | 许可 |
 |---|---|---|
