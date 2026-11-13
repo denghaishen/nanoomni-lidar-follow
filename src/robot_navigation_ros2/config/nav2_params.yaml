@@ -1,0 +1,579 @@
+# =============================================================================
+# nav2_params.yaml  —  NanoOmni 麦克纳姆全向轮 + Cartographer Online SLAM
+# =============================================================================
+# 设计要点:
+#   * 不启用 AMCL: map→odom TF 由 cartographer_node 发布
+#   * 不启用 nav2_map_server: /map 由 cartographer_occupancy_grid_node 发布
+#   * static_layer 订阅 /map, 必须用 Transient Local QoS (cartographer latched)
+#   * 控制器 MPPI motion_model=Omni: 利用麦轮全向能力 (linear.x + linear.y + angular.z)
+#   * 规划器 NavfnPlanner: 简单 A*, 地图持续变化时比 Smac Hybrid 更鲁棒
+#   * 机器人半径 0.18m (实测车体 ~0.18 x 0.22m, 取保守值)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Behavior Tree Navigator
+# -----------------------------------------------------------------------------
+bt_navigator:
+  ros__parameters:
+    use_sim_time: false
+    global_frame: map
+    robot_base_frame: base_link
+    odom_topic: /odom
+    bt_loop_duration: 20                 # 50Hz BT tick; 原 10ms=100Hz 实测 64 次 tick 超时
+    default_server_timeout: 50           # 原 20ms, 负载峰值时 follow_path 确认曾超时
+    wait_for_service_timeout: 1000
+    # 使用 nav2 默认 BT XML, 含 replanning + recovery
+    plugin_lib_names:
+      - nav2_compute_path_to_pose_action_bt_node
+      - nav2_compute_path_through_poses_action_bt_node
+      - nav2_smooth_path_action_bt_node
+      - nav2_follow_path_action_bt_node
+      - nav2_spin_action_bt_node
+      - nav2_wait_action_bt_node
+      - nav2_assisted_teleop_action_bt_node
+      - nav2_back_up_action_bt_node
+      - nav2_drive_on_heading_bt_node
+      - nav2_clear_costmap_service_bt_node
+      - nav2_is_stuck_condition_bt_node
+      - nav2_goal_reached_condition_bt_node
+      - nav2_goal_updated_condition_bt_node
+      - nav2_globally_updated_goal_condition_bt_node
+      - nav2_is_path_valid_condition_bt_node
+      - nav2_initial_pose_received_condition_bt_node
+      - nav2_reinitialize_global_localization_service_bt_node
+      - nav2_rate_controller_bt_node
+      - nav2_distance_controller_bt_node
+      - nav2_speed_controller_bt_node
+      - nav2_truncate_path_action_bt_node
+      - nav2_truncate_path_local_action_bt_node
+      - nav2_goal_updater_node_bt_node
+      - nav2_recovery_node_bt_node
+      - nav2_pipeline_sequence_bt_node
+      - nav2_round_robin_node_bt_node
+      - nav2_transform_available_condition_bt_node
+      - nav2_time_expired_condition_bt_node
+      - nav2_path_expiring_timer_condition
+      - nav2_distance_traveled_condition_bt_node
+      - nav2_single_trigger_bt_node
+      - nav2_goal_updated_controller_bt_node
+      - nav2_is_battery_low_condition_bt_node
+      - nav2_navigate_through_poses_action_bt_node
+      - nav2_navigate_to_pose_action_bt_node
+      - nav2_remove_passed_goals_action_bt_node
+      - nav2_planner_selector_bt_node
+      - nav2_controller_selector_bt_node
+      - nav2_goal_checker_selector_bt_node
+      - nav2_controller_cancel_bt_node
+      - nav2_path_longer_on_approach_bt_node
+      - nav2_wait_cancel_bt_node
+      - nav2_spin_cancel_bt_node
+      - nav2_back_up_cancel_bt_node
+      - nav2_assisted_teleop_cancel_bt_node
+      - nav2_drive_on_heading_cancel_bt_node
+      - nav2_is_battery_charging_condition_bt_node
+
+# -----------------------------------------------------------------------------
+# Controller Server (MPPI Omni)
+# -----------------------------------------------------------------------------
+controller_server:
+  ros__parameters:
+    use_sim_time: false
+    controller_frequency: 20.0
+    min_x_velocity_threshold: 0.001
+    min_y_velocity_threshold: 0.001
+    min_theta_velocity_threshold: 0.001
+    failure_tolerance: 0.3
+    progress_checker_plugin: "progress_checker"
+    goal_checker_plugins: ["general_goal_checker"]
+    controller_plugins: ["FollowPath"]
+    odom_topic: /odom
+
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+      required_movement_radius: 0.20      # 原 0.5 对小型车+0.1m 目标容差过大, 近目标调整易误判卡住
+      movement_time_allowance: 120.0
+
+    general_goal_checker:
+      plugin: "nav2_controller::SimpleGoalChecker"
+      xy_goal_tolerance: 0.10            # 到点容差 10 cm (麦轮可侧向修正, 取较紧)
+      yaw_goal_tolerance: 0.10            # 角度容差 ~5.7°
+      stateful: True
+
+    FollowPath:
+      plugin: "nav2_mppi_controller::MPPIController"
+      time_steps: 56
+      model_dt: 0.05
+      batch_size: 1500                    # 原 2000: 2000x56 状态/周期压垮 RK3588 实时性, 先降 25%
+      vx_std: 0.20
+      vy_std: 0.05                        # [HEADFIRST] 大幅降低侧移采样
+      wz_std: 0.40
+      vx_max: 0.30
+      vx_min: -0.20
+      vy_max: 0.05                        # [HEADFIRST] 限制横移 5cm/s, 减少麦轮 odom 漂移
+      wz_max: 1.5
+      iteration_count: 1
+      prune_distance: 1.7
+      transform_tolerance: 0.2
+      temperature: 0.3
+      gamma: 0.015
+      motion_model: "Omni"                # ⭐ 全向轮关键参数
+      visualize: false                    # 原 true 每周期额外发布 ~400 条采样轨迹, RViz 无对应显示, 纯开销
+      reset_period: 1.0                    # 0 disables; reset MPPI internals if no goal received
+      regenerate_noises: false
+      TrajectoryVisualizer:
+        trajectory_step: 5
+        time_step: 3
+      AckermannConstraints:
+        min_turning_r: 0.0
+      critics:
+        - "ConstraintCritic"
+        - "CostCritic"
+        - "GoalCritic"
+        - "GoalAngleCritic"
+        - "PathAlignCritic"
+        - "PathFollowCritic"
+        - "PathAngleCritic"
+        - "PreferForwardCritic"
+      ConstraintCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 4.0
+      GoalCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 5.0
+        threshold_to_consider: 1.4
+      GoalAngleCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 3.0
+        threshold_to_consider: 0.5
+      PreferForwardCritic:                # 实测语义: 惩罚 max(-vx,0) 即倒车, 不直接限制 vy.
+        enabled: true                      # 横移约束实际来自 vy_max/vy_std, 而非本 critic.
+        cost_power: 1
+        cost_weight: 15.0
+        threshold_to_consider: 0.5          # 距目标 0.5m 内停止惩罚, 允许倒车调整
+      CostCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 3.81
+        critical_cost: 300.0
+        consider_footprint: true            # 麦轮非圆: 用 footprint 检测
+        collision_cost: 1000000.0
+        near_goal_distance: 1.0
+        trajectory_point_step: 2
+      PathAlignCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 14.0
+        max_path_occupancy_ratio: 0.05
+        trajectory_point_step: 4
+        threshold_to_consider: 0.5
+        offset_from_furthest: 20
+        use_path_orientations: false
+      PathFollowCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 5.0
+        offset_from_furthest: 5
+        threshold_to_consider: 1.4
+      PathAngleCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 4.0                     # [HEADFIRST] 提高 2.0→4.0, 强化车头对准路径切线
+        offset_from_furthest: 4
+        threshold_to_consider: 0.5
+        max_angle_to_furthest: 1.0
+        forward_preference: true              # [HEADFIRST] 沿路径时保持车头朝前
+
+# -----------------------------------------------------------------------------
+# Local Costmap (车身周围 3x3 m 滚动窗口)
+# -----------------------------------------------------------------------------
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      use_sim_time: false
+      update_frequency: 5.0
+      publish_frequency: 2.0
+      global_frame: odom
+      robot_base_frame: base_link
+      rolling_window: true
+      width: 3
+      height: 3
+      resolution: 0.05
+      robot_radius: 0.18
+      plugins: ["obstacle_layer", "inflation_layer"]
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        observation_sources: scan
+        scan:
+          topic: /scan
+          max_obstacle_height: 2.0
+          clearing: true
+          marking: true
+          data_type: "LaserScan"
+          raytrace_max_range: 8.0
+          raytrace_min_range: 0.0
+          obstacle_max_range: 6.0
+          obstacle_min_range: 0.0
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        cost_scaling_factor: 8.0
+        inflation_radius: 0.25
+      always_send_full_costmap: true
+
+# -----------------------------------------------------------------------------
+# Global Costmap (订阅 cartographer /map)
+# -----------------------------------------------------------------------------
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      use_sim_time: false
+      update_frequency: 1.0
+      publish_frequency: 1.0
+      global_frame: map
+      robot_base_frame: base_link
+      robot_radius: 0.18
+      track_unknown_space: true
+      rolling_window: false
+      plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_subscribe_transient_local: true     # ⭐ 匹配 cartographer latched 发布
+        subscribe_to_updates: true               # ⭐ 接收 /map_updates, online SLAM 关键
+        transform_tolerance: 0.1
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        observation_sources: scan
+        scan:
+          topic: /scan
+          max_obstacle_height: 2.0
+          clearing: true
+          marking: true
+          data_type: "LaserScan"
+          raytrace_max_range: 8.0
+          raytrace_min_range: 0.0
+          obstacle_max_range: 6.0
+          obstacle_min_range: 0.0
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        cost_scaling_factor: 8.0
+        inflation_radius: 0.25
+      always_send_full_costmap: true
+
+# -----------------------------------------------------------------------------
+# Planner Server (NavfnPlanner = A*)
+# -----------------------------------------------------------------------------
+planner_server:
+  ros__parameters:
+    use_sim_time: false
+    expected_planner_frequency: 1.0
+    planner_plugins: ["GridBased"]
+    GridBased:
+      plugin: "nav2_navfn_planner/NavfnPlanner"
+      tolerance: 0.5
+      use_astar: true
+      allow_unknown: true                  # online SLAM: 允许穿越未知区域
+
+# -----------------------------------------------------------------------------
+# Behavior Server (Recovery 行为)
+# -----------------------------------------------------------------------------
+behavior_server:
+  ros__parameters:
+    use_sim_time: false
+    local_costmap_topic: local_costmap/costmap_raw
+    global_costmap_topic: global_costmap/costmap_raw
+    local_footprint_topic: local_costmap/published_footprint
+    global_footprint_topic: global_costmap/published_footprint
+    cycle_frequency: 10.0
+    behavior_plugins: ["spin", "backup", "drive_on_heading", "assisted_teleop", "wait"]
+    spin:
+      plugin: "nav2_behaviors/Spin"
+    backup:
+      plugin: "nav2_behaviors/BackUp"
+    drive_on_heading:
+      plugin: "nav2_behaviors/DriveOnHeading"
+    wait:
+      plugin: "nav2_behaviors/Wait"
+    assisted_teleop:
+      plugin: "nav2_behaviors/AssistedTeleop"
+    local_frame: odom
+    global_frame: map
+    robot_base_frame: base_link
+    transform_tolerance: 0.1
+    simulate_ahead_time: 2.0
+    max_rotational_vel: 1.0
+    min_rotational_vel: 0.4
+    rotational_acc_lim: 3.2
+
+# -----------------------------------------------------------------------------
+# Motion Command Arbiter (Nav2 / 跟随速度源互斥)
+# -----------------------------------------------------------------------------
+motion_command_arbiter:
+  ros__parameters:
+    use_sim_time: false
+    nav_cmd_vel_topic: "/cmd_vel_nav"
+    follow_cmd_vel_topic: "/cmd_vel_follow"
+    output_cmd_vel_topic: "/cmd_vel_selected"
+    mode_request_topic: "/motion_mode/request"
+    mode_status_topic: "/motion_mode/status"
+    nav_service: "/motion_mode/nav"
+    follow_service: "/motion_mode/follow"
+    stop_service: "/motion_mode/stop"
+    initial_mode: "NAV"
+    nav_source_timeout: 0.5
+    follow_source_timeout: 0.5
+    switch_stop_duration: 0.05
+    publish_frequency: 30.0
+    gate_collision_monitor: true
+    collision_monitor_param_service: "/collision_monitor/set_parameters"
+    collision_front_stop_param: "FrontStopZone.enabled"
+
+# -----------------------------------------------------------------------------
+# Lidar Target Follower (车头前方点云目标双向距离保持)
+# -----------------------------------------------------------------------------
+lidar_target_follower:
+  ros__parameters:
+    use_sim_time: false
+    scan_topic: "/scan"
+    target_topic: "/follow/target"
+    selection_topic: "/follow/selection"
+    cmd_vel_out_topic: "/cmd_vel_follow"
+    status_topic: "/follow/status"
+    tracked_target_topic: "/follow/tracked_target"
+    mode_request_topic: "/motion_mode/request"
+    mode_status_topic: "/motion_mode/status"
+    start_service: "/follow/start"
+    stop_service: "/follow/stop"
+    patrol_pause_service: "/patrol/pause"
+    pause_patrol_on_start: true
+    start_on_target_selection: true
+    base_frame_id: "base_link"
+    follow_distance: 1.0
+    distance_deadband: 0.05
+    target_radius: 0.30
+    selection_min_radius: 0.10
+    selection_max_radius: 0.80
+    min_target_points: 1
+    scan_timeout: 0.5
+    target_loss_timeout: 0.5
+    motion_mode_timeout: 0.5
+    transform_timeout: 0.1
+    control_frequency: 10.0
+    linear_gain: 0.5
+    angular_gain: 1.0
+    max_forward_speed: 0.30
+    max_reverse_speed: 0.20
+    max_angular_speed: 1.0
+    allow_reverse: true
+    use_lateral_velocity: false
+    rotate_first_angle: 0.30
+    angular_deadband: 0.10
+    target_min_x: 0.30
+    target_max_x: 3.00
+    target_max_abs_y: 1.50
+
+# -----------------------------------------------------------------------------
+# Lidar Follow Web (jie_deamon 风格雷达网页与拖拽圆选)
+# -----------------------------------------------------------------------------
+lidar_follow_web:
+  ros__parameters:
+    use_sim_time: false
+    scan_topic: "/scan"
+    battery_topic: "/battery"
+    selection_topic: "/follow/selection"
+    tracked_target_topic: "/follow/tracked_target"
+    follow_command_topic: "/cmd_vel_follow"
+    follow_status_topic: "/follow/status"
+    motion_status_topic: "/motion_mode/status"
+    follow_cmd_topic: "/cmd_vel_follow"
+    start_service: "/follow/start"
+    stop_service: "/follow/stop"
+    base_frame_id: "base_link"
+    transform_timeout: 0.1
+    broadcast_frequency: 5.0
+    max_points: 160
+    selection_min_radius: 0.10
+    selection_max_radius: 0.80
+    follow_distance_param_service: "/lidar_target_follower/set_parameters"
+    follow_distance_param_name: "follow_distance"
+    distance_min: 0.40
+    distance_max: 2.00
+    initial_follow_distance: 1.0
+    system_control_enabled: false
+    system_ros2_executable: "/opt/ros/humble/bin/ros2"
+    system_launch_package: "robot_navigation_ros2"
+    system_launch_file: "slam_nav.launch.py"
+    system_launch_use_rviz: false
+    system_launch_start_web: false
+    system_stop_grace_seconds: 20.0
+    web_bind_address: "0.0.0.0"
+    web_port: 8080
+    web_root: ""
+
+# -----------------------------------------------------------------------------
+# Velocity Smoother (cmd_vel 平滑)
+# -----------------------------------------------------------------------------
+velocity_smoother:
+  ros__parameters:
+    use_sim_time: false
+    smoothing_frequency: 30.0            # 高于 20Hz 控制频率, 两次指令之间才能真正插值
+    scale_velocities: true               # 单轴触发限幅时按比例缩放各轴, 保持速度矢量方向
+    feedback: "OPEN_LOOP"                # odom twist 噪声/延迟未标定前不改 CLOSED_LOOP
+    max_velocity: [0.30, 0.05, 1.5]      # [HEADFIRST] vy 限 5cm/s, 与 MPPI vy_max 一致
+    min_velocity: [-0.20, -0.05, -1.5]
+    max_accel: [0.8, 0.5, 2.0]           # 原 [2.5,2.5,3.2]: 0.02~0.5s 即达最大速度, 几乎无平滑效果
+    max_decel: [-1.0, -0.7, -2.5]
+    odom_topic: "odom"
+    odom_duration: 0.1
+    deadband_velocity: [0.0, 0.0, 0.0]
+    velocity_timeout: 0.4                # 原 1.0s: 上游失联后最多以 0.3m/s 再跑 ~30cm
+
+# -----------------------------------------------------------------------------
+# Waypoint Follower (多点导航, 可选)
+# -----------------------------------------------------------------------------
+waypoint_follower:
+  ros__parameters:
+    use_sim_time: false
+    loop_rate: 20
+    stop_on_failure: false
+    waypoint_task_executor_plugin: "wait_at_waypoint"
+    wait_at_waypoint:
+      plugin: "nav2_waypoint_follower::WaitAtWaypoint"
+      enabled: true
+      waypoint_pause_duration: 200
+
+# -----------------------------------------------------------------------------
+# Scan Safety Watchdog (激光/TF 失效时阻断非零速度)
+# -----------------------------------------------------------------------------
+scan_safety_watchdog:
+  ros__parameters:
+    use_sim_time: false
+    scan_topic: "/scan"
+    cmd_vel_in_topic: "/cmd_vel_smoothed"
+    cmd_vel_out_topic: "/cmd_vel_collision_input"
+    base_frame_id: "base_link"
+    scan_timeout: 0.5
+    transform_timeout: 0.1
+
+# -----------------------------------------------------------------------------
+# Collision Monitor (车头前缘约 30 cm 人体停止区)
+#   * FrontStopZone 由 motion_command_arbiter 按运动模式切换:
+#     - NAV/STOP 模式: enabled=true   (正前方硬停止)
+#     - FOLLOW 模式:  enabled=false  (放行接近目标时的倒车命令)
+# -----------------------------------------------------------------------------
+collision_monitor:
+  ros__parameters:
+    use_sim_time: false
+    base_frame_id: "base_link"
+    odom_frame_id: "odom"
+    cmd_vel_in_topic: "/cmd_vel_collision_input"
+    cmd_vel_out_topic: "/cmd_vel"
+    transform_tolerance: 0.2
+    source_timeout: 0.5
+    base_shift_correction: false
+    stop_pub_timeout: 2.0
+    polygons: ["FrontStopZone"]
+    FrontStopZone:
+      type: "polygon"
+      points: [0.41, 0.25, 0.41, -0.25, 0.10, -0.25, 0.10, 0.25]
+      action_type: "stop"
+      max_points: 2
+      visualize: true
+      polygon_pub_topic: "front_stop_zone"
+      enabled: true
+    observation_sources: ["scan"]
+    scan:
+      type: "scan"
+      topic: "/scan"
+      enabled: true
+
+# =============================================================================
+# 以下为 "有地图导航" 模式专用 (nav_with_map.launch.py)
+#   * map_server : 加载 .pgm/.yaml 离线地图, 替代 cartographer 的 /map
+#   * amcl       : 粒子滤波定位, 替代 cartographer 发布 map->odom TF
+# SLAM 在线模式 (slam_nav.launch.py) 不会启动这两个节点, 配置共存无冲突.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Map Server (离线地图加载)
+# -----------------------------------------------------------------------------
+map_server:
+  ros__parameters:
+    use_sim_time: false
+    # yaml_filename 由 launch 通过 --params-file + 命令行 -p 注入,
+    # 默认占位指向 ~/map/my_map.yaml. 若改放其他位置, 在 launch 里覆盖.
+    yaml_filename: ""
+    topic_name: "map"
+    frame_id: "map"
+
+# -----------------------------------------------------------------------------
+# AMCL (Adaptive Monte Carlo Localization)
+# -----------------------------------------------------------------------------
+# 关键决策:
+#   * robot_model_type=OmniMotionModel   麦克纳姆全向轮必须用 Omni 运动模型
+#   * base_frame_id=base_footprint      与 base_control_ros2 发布的 TF 一致
+#   * laser_max_range=8.0 / min=0.15   与 Cartographer/S4 配置对齐
+#   * set_initial_pose=false: 不假设每次都从建图原点启动；启动后用 RViz 2D Pose Estimate
+#     指定机器人在地图中的真实位置，并把箭头指向真实车头。
+# -----------------------------------------------------------------------------
+amcl:
+  ros__parameters:
+    use_sim_time: false
+    # 里程计噪声 (Omni 运动模型 5 个 alpha)
+    alpha1: 0.2          # 旋转噪声中的旋转分量
+    alpha2: 0.2          # 平移噪声中的旋转分量
+    alpha3: 0.2          # 平移噪声中的平移分量
+    alpha4: 0.2          # 旋转噪声中的平移分量
+    alpha5: 0.2          # Omni 模型独有: 横向平移噪声
+    # Frame
+    base_frame_id: "base_footprint"
+    odom_frame_id: "odom"
+    global_frame_id: "map"
+    tf_broadcast: true
+    transform_tolerance: 1.0
+    # 激光观测模型
+    laser_model_type: "likelihood_field"
+    laser_max_range: 8.0
+    laser_min_range: 0.15
+    max_beams: 60
+    laser_likelihood_max_dist: 2.0
+    sigma_hit: 0.2
+    z_hit: 0.5
+    z_max: 0.05
+    z_rand: 0.5
+    z_short: 0.05
+    lambda_short: 0.1
+    # 粒子滤波
+    min_particles: 500
+    max_particles: 2000
+    pf_err: 0.05
+    pf_z: 0.99
+    resample_interval: 1
+    # 重采样恢复 (绑架问题; 关闭=0.0 与默认一致, 走廊定位更稳)
+    recovery_alpha_slow: 0.0
+    recovery_alpha_fast: 0.0
+    # 何时触发更新 (位移/角度阈值)
+    update_min_a: 0.2
+    update_min_d: 0.25
+    # Beam Skip (高动态环境抗动态障碍, 默认关)
+    do_beamskip: false
+    beam_skip_distance: 0.5
+    beam_skip_error_threshold: 0.9
+    beam_skip_threshold: 0.3
+    save_pose_rate: 0.5
+    robot_model_type: "nav2_amcl::OmniMotionModel"   # ⭐ 麦克纳姆/全向轮关键
+    # Topics
+    scan_topic: "scan"
+    map_topic: "map"
+    # 初始位姿必须由 RViz 2D Pose Estimate 提供，机器人可在地图任意已知位置启动
+    set_initial_pose: false
+    always_reset_initial_pose: false
+    first_map_only: false
+    initial_pose:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      yaw: 0.0

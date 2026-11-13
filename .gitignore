@@ -1,0 +1,25 @@
+# colcon / ROS 2 build artifacts
+build/
+install/
+log/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# local archives and recordings
+*.zip
+*.tar.gz
+*.bag
+*.db3
+
+# maps and recorded data may reveal private environments
+*.pgm
+map/
+
+# editor / OS
+.vscode/
+.idea/
+.DS_Store
+
+# third-party study checkouts (not part of this project)
+cartographer_study/

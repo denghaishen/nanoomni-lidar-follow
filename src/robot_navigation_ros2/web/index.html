@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>激光目标圈选</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="layout">
+    <header>
+      <div>
+        <h1>机器人激光跟随</h1>
+        <p>手机触摸或电脑鼠标按住目标点，拖出圆圈后松开即可锁定。</p>
+        <p class="address">当前地址：<strong id="pageAddress"></strong></p>
+      </div>
+      <span id="connection" class="badge offline">未连接</span>
+    </header>
+
+    <section class="system-control">
+      <div class="system-state">
+        <span>机器人系统</span>
+        <strong id="systemStatus">检查中</strong>
+      </div>
+      <button id="systemStartButton" class="success" type="button" disabled>启动系统</button>
+      <button id="systemStopButton" class="danger" type="button" disabled>停止系统</button>
+    </section>
+    <p class="system-note">启动后自动运行底盘、雷达、在线建图和导航；网页不会关闭。</p>
+
+    <section class="status-grid">
+      <div><span>跟随</span><strong id="followStatus">IDLE</strong></div>
+      <div><span>模式</span><strong id="motionStatus">NAV</strong></div>
+      <div><span>目标距离</span><strong id="targetDistance">-- m</strong></div>
+      <div><span>速度指令</span><strong id="commandValue">0.00 m/s</strong></div>
+      <div><span>电池电压</span><strong id="batteryValue">-- V</strong></div>
+      <div><span>选择半径</span><strong id="radiusValue">0.30 m</strong></div>
+    </section>
+
+    <section class="canvas-wrap">
+      <canvas id="lidarCanvas"></canvas>
+      <div class="legend">
+        <span><i class="dot red"></i>雷达点</span>
+        <span><i class="dot yellow"></i>圈选区域</span>
+        <span><i class="dot green"></i>跟踪目标</span>
+      </div>
+    </section>
+
+    <section class="distance-control">
+      <label for="distanceSlider">保持距离</label>
+      <input type="range" id="distanceSlider" min="0.4" max="2.0" step="0.05" value="1.0" disabled>
+      <output id="distanceValue">1.00 m</output>
+    </section>
+
+    <section class="controls follow-controls">
+      <button id="startButton" type="button" disabled>继续跟随</button>
+      <button id="stopButton" class="danger" type="button" disabled>停止跟随</button>
+    </section>
+
+    <p id="message" class="message">等待雷达数据。网页圆选使用机器人局部坐标，不依赖地图定位。</p>
+    <footer>安全适配自 jie_deamon（MIT）；网页不具备直接发布 /cmd_vel 的能力。</footer>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

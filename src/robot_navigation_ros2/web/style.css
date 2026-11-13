@@ -1,0 +1,99 @@
+:root {
+  color-scheme: dark;
+  font-family: system-ui, -apple-system, "Noto Sans SC", sans-serif;
+  background: #071019;
+  color: #e5eef7;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; min-height: 100dvh; }
+.layout { width: min(1100px, 100%); margin: 0 auto; padding: 18px; }
+header { display: flex; justify-content: space-between; gap: 20px; align-items: center; }
+h1 { margin: 0; font-size: 1.55rem; }
+header p { color: #9db0c3; margin: 6px 0 0; }
+header .address { font-size: .84rem; }
+header .address strong { color: #d8e8f7; }
+.badge { border-radius: 999px; padding: 7px 12px; font-weight: 700; }
+.badge.online { background: #123d2d; color: #58e0a1; }
+.badge.offline { background: #4a2025; color: #ff8e99; }
+
+.system-control {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(130px, .5fr) minmax(130px, .5fr);
+  gap: 10px;
+  align-items: stretch;
+  margin: 16px 0 6px;
+}
+.system-state { background: #101d29; border: 1px solid #213547; border-radius: 10px; padding: 10px 12px; }
+.system-state span { display: block; color: #8da1b4; font-size: .82rem; }
+.system-state strong { display: block; margin-top: 3px; }
+.system-state strong[data-state="RUNNING"] { color: #58e0a1; }
+.system-state strong[data-state="STOPPED"] { color: #ffca6b; }
+.system-state strong[data-state="STOPPING"] { color: #ffca6b; }
+.system-state strong[data-state="FAILED"] { color: #ff8792; }
+.system-note { margin: 0 2px 12px; color: #7f94a7; font-size: .82rem; }
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 16px 0;
+}
+.status-grid div { background: #101d29; border: 1px solid #213547; border-radius: 10px; padding: 10px 12px; }
+.status-grid span { display: block; color: #8da1b4; font-size: .82rem; }
+.status-grid strong { display: block; margin-top: 3px; color: #f5f9fc; overflow-wrap: anywhere; }
+
+.canvas-wrap { position: relative; background: #050a0f; border: 1px solid #284055; border-radius: 12px; overflow: hidden; }
+#lidarCanvas { display: block; width: 100%; height: min(68vh, 720px); touch-action: none; cursor: crosshair; }
+.legend { position: absolute; left: 12px; top: 12px; display: flex; gap: 12px; flex-wrap: wrap; background: rgba(5,10,15,.78); padding: 7px 10px; border-radius: 8px; font-size: .8rem; }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; }
+.red { background: #ff4d58; }
+.yellow { background: #ffd84d; }
+.green { background: #3ce890; }
+
+.controls { display: flex; gap: 12px; margin-top: 14px; }
+.distance-control {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  align-items: center;
+  margin: 12px 0;
+  background: #101d29;
+  border: 1px solid #213547;
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.distance-control label { color: #8da1b4; font-size: .9rem; white-space: nowrap; }
+.distance-control output { color: #f5f9fc; font-weight: 700; min-width: 64px; text-align: right; }
+input[type="range"] { width: 100%; accent-color: #1768a6; }
+button { flex: 1; min-height: 50px; border: 0; border-radius: 10px; padding: 13px; color: #eef6ff; background: #1768a6; font-size: 1rem; font-weight: 700; cursor: pointer; touch-action: manipulation; }
+button.danger { background: #a62c3a; }
+button.success { background: #167a53; }
+button:disabled { opacity: .42; cursor: not-allowed; }
+button:active:not(:disabled) { transform: translateY(1px); }
+.message { min-height: 1.4em; color: #9fb3c7; }
+.message.error { color: #ff8792; }
+footer { color: #6f8396; font-size: .76rem; text-align: center; margin-top: 16px; }
+
+@media (max-width: 700px) {
+  .layout { padding: 10px; padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+  header { align-items: flex-start; flex-wrap: wrap; gap: 10px; }
+  header .badge { position: absolute; right: 10px; top: 10px; }
+  header > div { padding-right: 84px; }
+  header p { font-size: .88rem; }
+  .status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 10px 0; }
+  .system-control { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 12px; }
+  .system-state { grid-column: 1 / -1; }
+  #lidarCanvas { height: 52vh; height: 52dvh; min-height: 300px; max-height: 520px; }
+  .controls {
+    position: sticky;
+    z-index: 5;
+    bottom: max(8px, env(safe-area-inset-bottom));
+    padding: 8px;
+    margin: 8px -2px 0;
+    border: 1px solid #284055;
+    border-radius: 12px;
+    background: #071019;
+  }
+  .message { margin: 10px 2px; }
+}

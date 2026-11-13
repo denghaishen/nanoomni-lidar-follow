@@ -1,0 +1,19 @@
+[Unit]
+Description=Robot browser control panel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/cartographer_ws
+Environment=PYTHONUNBUFFERED=1
+Environment=ROS_LOCALHOST_ONLY=1
+ExecStart=/bin/bash -lc 'source /opt/ros/humble/setup.bash && source %h/cartographer_ws/install/setup.bash && exec ros2 launch robot_navigation_ros2 web_control.launch.py'
+Restart=on-failure
+RestartSec=3
+KillSignal=SIGINT
+KillMode=control-group
+TimeoutStopSec=35
+
+[Install]
+WantedBy=default.target
