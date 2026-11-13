@@ -93,6 +93,12 @@ sudo apt install -y \
   python3-serial
 ```
 
+可选：自动补齐 `package.xml` 中声明的依赖（首次使用 rosdep 时先执行 `sudo rosdep init && rosdep update`）：
+
+```bash
+rosdep install --from-paths src --ignore-src -r -y
+```
+
 ### 串口权限
 
 ```bash
